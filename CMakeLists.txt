@@ -1,0 +1,62 @@
+cmake_minimum_required(VERSION 3.10)
+
+# Set the project name and version
+project(VulkanApp VERSION 1.0)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# Find Vulkan
+find_package(Vulkan REQUIRED)
+
+# Find GLFW
+find_package(GLFW3 REQUIRED)
+
+# Find GLM
+find_package(glm REQUIRED)
+
+# Set include directories
+include_directories(${GLFW3_INCLUDE_DIRS})
+include_directories(${Vulkan_INCLUDE_DIR})
+include_directories(${GLM_INCLUDE_DIRS})
+
+# Add the source files
+file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h")
+
+# Add the executable
+add_executable(VulkanApp ${SOURCES})
+
+# print where find_package is looking
+message(STATUS "Vulkan_INCLUDE_DIR: ${Vulkan_INCLUDE_DIR}")
+
+# Link Vulkan and GLFW
+target_link_libraries(VulkanApp Vulkan::Vulkan glfw glm::glm)
+
+# Platform-specific settings
+if(APPLE)
+    # macOS specific settings
+    find_library(COCOA_LIBRARY Cocoa REQUIRED)
+    find_library(IOKIT_LIBRARY IOKit REQUIRED)
+    find_library(COREVIDEO_LIBRARY CoreVideo REQUIRED)
+    find_library(MOLTENVK MoltenVK REQUIRED)
+    
+    target_link_libraries(VulkanApp ${COCOA_LIBRARY} ${IOKIT_LIBRARY} ${COREVIDEO_LIBRARY} ${MOLTENVK})
+    
+    # Add MoltenVK path (assuming MoltenVK is installed via Vulkan SDK)
+    target_link_libraries(VulkanApp ${Vulkan_LIBRARY})
+    
+    # Set compile definitions for macOS
+    target_compile_definitions(VulkanApp PRIVATE VK_USE_PLATFORM_MACOS_MVK)
+else()
+    # Windows specific settings
+    target_compile_definitions(VulkanApp PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+endif()
+
+# Post build instructions
+if(APPLE)
+    # Copy MoltenVK dynamic library to the executable output directory on macOS
+    add_custom_command(TARGET VulkanApp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        ${Vulkan_LIBRARY} $<TARGET_FILE_DIR:VulkanApp>)
+endif()
