@@ -10,7 +10,7 @@
                 "-B", "${workspaceFolder}/build"
             ],
             "group": "build",
-            "problemMatcher": []
+            "problemMatcher": [],
         },
         {
             "label": "build",
@@ -25,6 +25,13 @@
             },
             "dependsOn": "configure",
             "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "runnerz",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/VulkanApp",
+            "group": "none",
+            "problemMatcher": []
         }
     ]
 }
