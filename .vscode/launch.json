@@ -16,13 +16,19 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb",
-            "osx": {
-                "MIMode": "lldb"
-            },
-            "windows": {
-                "MIMode": "gdb",
-                "program": "${workspaceFolder}/build/Debug/VulkanApp.exe",
-            },
+        },
+        {
+            "name": "(Windows) Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/build/Debug/VulkanApp.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "symbolSearchPath": "",
         }
     ]
 }

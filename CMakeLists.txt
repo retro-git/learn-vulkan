@@ -17,9 +17,14 @@ find_package(Vulkan REQUIRED)
 
 # add glfw3 with cpm
 CPMAddPackage(
-    NAME glfw3
-    GITHUB_REPOSITORY glfw/glfw
-    GIT_TAG 3.3.4
+  NAME glfw
+  GITHUB_REPOSITORY glfw/glfw
+  GIT_TAG 3.3.4
+  OPTIONS
+	"GLFW_BUILD_TESTS Off"
+	"GLFW_BUILD_EXAMPLES Off"
+	"GLFW_BUILD_DOCS Off"
+    "GLFW_INSTALL Off"
 )
 
 # Find GLM
