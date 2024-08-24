@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.10)
 # Set the project name and version
 project(VulkanApp VERSION 1.0)
 
+include(cmake/CPM.cmake)
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -11,10 +13,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 find_package(Vulkan REQUIRED)
 
 # Find GLFW
-find_package(GLFW3 REQUIRED)
+# find_package(GLFW3 REQUIRED)
+
+# add glfw3 with cpm
+CPMAddPackage(
+    NAME glfw3
+    GITHUB_REPOSITORY glfw/glfw
+    GIT_TAG 3.3.4
+)
 
 # Find GLM
-find_package(glm REQUIRED)
+# find_package(glm REQUIRED)
+
+# add glm with cpm
+CPMAddPackage(
+  NAME glm
+  GITHUB_REPOSITORY g-truc/glm
+  GIT_TAG 0.9.9.8
+)
 
 # Set include directories
 include_directories(${GLFW3_INCLUDE_DIRS})
