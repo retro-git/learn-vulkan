@@ -111,7 +111,8 @@ private:
     VkExtent2D swapChainExtent;                   // Resolution of the swap chain images
     std::vector<VkImageView> swapChainImageViews; // Image views to interpret the images in the swap chain
 
-    VkPipelineLayout pipelineLayout; // A pipeline layout is a Vulkan object that defines the set of resources that can be accessed by a pipeline
+    VkRenderPass renderPass;         // Describes the attachments used during rendering
+    VkPipelineLayout pipelineLayout; // Uniform values for shaders
 
     void initWindow()
     {
@@ -125,14 +126,15 @@ private:
 
     void initVulkan()
     {
-        createInstance();
-        setupDebugMessenger();
-        createSurface();
-        pickPhysicalDevice();
-        createLogicalDevice();
-        createSwapChain();
-        createImageViews();
-        createGraphicsPipeline();
+        createInstance();         // Connection between application and Vulkan library
+        setupDebugMessenger();    // Debug messenger to receive debug messages from validation layers
+        createSurface();          // Connection between window and Vulkan library (because Vulkan is platform agnostic)
+        pickPhysicalDevice();     // GPU
+        createLogicalDevice();    // Logical device to interact with physical device (requires setting up queues)
+        createSwapChain();        // Queue of images to be presented to the screen (double buffering, triple buffering) - (requires surface, sets up images, format, extent)
+        createImageViews();       // Image views to interpret the images in the swap chain (requires swap chain)
+        createRenderPass();       // Describes the attachments used during rendering (requires swap chain image format)
+        createGraphicsPipeline(); // Configure the programmable and fixed-function stages of the pipeline
     }
 
     static std::vector<char> readFile(const std::string &filename)
@@ -156,6 +158,62 @@ private:
         return buffer;
     }
 
+    void createRenderPass()
+    {
+        // A render pass is a collection of attachments, subpasses, and dependencies between the subpasses.
+        // It describes the layout of the attachments, the number of subpasses, and how the subpasses are connected.
+        // An attachment is a reference to an image resource that can be used as a framebuffer.
+        // A subpass is a rendering operation that reads from and writes to the attachments.
+        // One subpass can reference the contents of the previous subpass, allowing for composition of multiple rendering operations.
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = swapChainImageFormat;   // Format should match the format of the swap chain images
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // Number of samples to write for multisampling
+
+        // LoadOp: What to do with the data in the attachment before rendering (e.g. clear it or preserve it)
+        // StoreOp: What to do with the data in the attachment after rendering (e.g. store it or discard it)
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        // StencilLoadOp and StencilStoreOp are similar to LoadOp and StoreOp, but apply to the stencil data
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+        // InitialLayout: Layout of the image before the render pass
+        // FinalLayout: Layout of the image after the render pass
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;     // Layout to automatically transition from when the render pass begins
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Layout to automatically transition to when the render pass finishes (in this case, the image will be presented to the screen)
+
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;                                    // Index of the attachment in the attachment descriptions array
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Layout of the attachment during the subpass (color attachment)
+
+        // Subpasses are subsequent rendering operations that depend on the contents of the previous subpass
+        // A subpass description references the index of the color and depth/stencil attachments
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; // Pipeline type (graphics, compute, ray tracing)
+        subpass.colorAttachmentCount = 1;                            // Number of color attachments. The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive
+        subpass.pColorAttachments = &colorAttachmentRef;             // Reference to the color attachment
+
+        // The following other types of attachments can be referenced in a subpass:
+        // pInputAttachments: Attachments that are read from a shader
+        // pResolveAttachments: Attachments used for multisampling color attachments
+        // pDepthStencilAttachment: Attachment for depth and stencil data
+        // pPreserveAttachments: Attachments that are not used by this subpass, but for which the data must be preserved
+
+        // Finally, we create the render pass
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;             // Number of attachments
+        renderPassInfo.pAttachments = &colorAttachment; // Attachments
+        renderPassInfo.subpassCount = 1;                // Number of subpasses
+        renderPassInfo.pSubpasses = &subpass;           // Subpasses
+
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create render pass!");
+        }
+    }
+
     // Shader modules are used to load SPIR-V bytecode into Vulkan
     VkShaderModule createShaderModule(const std::vector<char> &code)
     {
@@ -175,6 +233,20 @@ private:
 
     void createGraphicsPipeline()
     {
+        // We need to configure the stages of the graphics pipeline
+        // These stages can include:
+        // 1) Vertex input (format of the vertex data - e.g. the position, color, texture coordinates, etc.)
+        // 2) Input assembly (how vertices are assembled into primitives - e.g. points, lines, triangles)
+        // 3) Vertex shader (operations on each vertex)
+        // 4) Tesselation shaders (optional, used for tessellation)
+        // 5) Geometry shader  (optional, operations on geometry)
+        // 6) Rasterization (creating fragments from vertices - e.g. wireframe, point, fill)
+        // 7) Fragment shader (operations on each fragment)
+        // 8) Color blending (combining the color of a fragment with the color already in the framebuffer)
+        // 9) Viewport (transformation from image space to screen space)
+        // 10) Scissor test (discarding fragments outside a rectangle)
+
+        // -- Start by configuring the programmable stages of the pipeline --
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
 
@@ -194,6 +266,8 @@ private:
         fragShaderStageInfo.pName = "main";
 
         VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+        // -- Next, configure the fixed-function stages of the pipeline --
 
         // Describes the format of the vertex data that will be passed to the vertex shader
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
@@ -219,32 +293,33 @@ private:
         // It also performs depth testing, face culling and the scissor test
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterizer.depthClampEnable = VK_FALSE;
-        rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-        rasterizer.depthBiasEnable = VK_FALSE;
+        rasterizer.depthClampEnable = VK_FALSE;         // If true, fragments beyond the near and far planes are clamped to them as opposed to discarding them. Useful for shadow maps.
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;  // If true, geometry never passes through the rasterizer stage. Effectively disables any output to the framebuffer.
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;  // Fill the area of the polygon with fragments
+        rasterizer.lineWidth = 1.0f;                    // Line width in fragments
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;    // Cull the back faces
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // Clockwise winding order
+        rasterizer.depthBiasEnable = VK_FALSE;          // Depth bias adjusts the depth of a fragment to reduce visual artifacts
 
         // The multisampling state is used for anti-aliasing
         // We will use 1 sample per pixel, so we will disable it
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.sampleShadingEnable = VK_FALSE;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampling.sampleShadingEnable = VK_FALSE;               // Enable multisampling
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT; // Number of samples to use per fragment
 
-        // In Vulkan, an attachment refers to a framebuffer that a render pass will use
-        // A render pass will use one or more attachments to fill in during rendering
+        // After a fragment shader has returned a color, it needs to be combined with the color that is already in the framebuffer
+        // This is known as color blending
+        // It could be done by: 1) Mix the old and new color, 2) Combine the old and new color using a bitwise operation
+        // VkPipelineColorBlendAttachmentState allows us to configure the first way (mixing), but in our case we will disable it (just overwrite the color)
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT; // RGBA color channels
         colorBlendAttachment.blendEnable = VK_FALSE;
 
-        // The color blending state is used to combine the color from the fragment shader with the color that is already in the framebuffer
-        // We will use the default values for blending
+        // VkPipelineColorBlendStateCreateInfo describes the global color blending settings
         VkPipelineColorBlendStateCreateInfo colorBlending{};
         colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.logicOpEnable = VK_FALSE; // If true, bitwise color blending is enabled (will overwrite blending, even if blendEnable is true)
         colorBlending.logicOp = VK_LOGIC_OP_COPY;
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
@@ -263,7 +338,7 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
-        // The pipeline layout is a Vulkan object that defines the set of resources that can be accessed by a pipeline
+        // Describes the layout of the uniform values in the shaders
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 0;
@@ -788,6 +863,10 @@ private:
 
     void cleanup()
     {
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
+        vkDestroyRenderPass(device, renderPass, nullptr);
+
         for (auto imageView : swapChainImageViews)
         {
             vkDestroyImageView(device, imageView, nullptr);
