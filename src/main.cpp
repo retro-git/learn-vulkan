@@ -166,13 +166,13 @@ private:
     void createGraphicsPipeline()
     {
         std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
-        //  auto fragShaderCode = readFile("shaders/frag.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
 
-        // VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-        // VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
-        // vkDestroyShaderModule(device, fragShaderModule, nullptr);
-        // vkDestroyShaderModule(device, vertShaderModule, nullptr);
+        vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
 
     void createImageViews()
