@@ -249,15 +249,7 @@ private:
         // 10) Scissor test (discarding fragments outside a rectangle)
 
         // -- Start by configuring the programmable stages of the pipeline --
-        std::filesystem::path shaderPath = std::filesystem::current_path();
-        // if apple, we need to go into shaders/ folder
-        // if windows, we need to go into src/shaders/ folder
-#ifdef __APPLE__
-        shaderPath /= "shaders";
-#else
-        shaderPath /= "src/shaders";
-#endif
-
+        std::filesystem::path shaderPath = std::filesystem::current_path() / "src" / "shaders";
         auto vertShaderCode = readFile((shaderPath / "vert.spv").string());
         auto fragShaderCode = readFile((shaderPath / "frag.spv").string());
 
