@@ -4,12 +4,16 @@
 #include <vulkan/vulkan_beta.h>
 
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
+#include <algorithm>
+#include <vector>
+#include <cstring>
 #include <cstdlib>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <set>
-#include <limits>
-#include <algorithm>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -95,6 +99,11 @@ private:
     VkDevice device;
     VkQueue graphicsQueue;
     VkQueue presentQueue;
+    VkSwapchainKHR swapChain;
+    std::vector<VkImage> swapChainImages;
+    VkFormat swapChainImageFormat;
+    VkExtent2D swapChainExtent;
+    std::vector<VkImageView> swapChainImageViews;
 
     void initWindow()
     {
@@ -114,6 +123,89 @@ private:
         pickPhysicalDevice();
         createLogicalDevice();
         createSwapChain();
+        createImageViews();
+        createGraphicsPipeline();
+    }
+
+    static std::vector<char> readFile(const std::string &filename)
+    {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open())
+        {
+            throw std::runtime_error("failed to open file!");
+        }
+
+        size_t fileSize = (size_t)file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+
+        file.close();
+
+        return buffer;
+    }
+
+    VkShaderModule createShaderModule(const std::vector<char> &code)
+    {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size();
+        createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create shader module!");
+        }
+
+        return shaderModule;
+    }
+
+    void createGraphicsPipeline()
+    {
+        std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
+        //  auto fragShaderCode = readFile("shaders/frag.spv");
+
+        // VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        // VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        // vkDestroyShaderModule(device, fragShaderModule, nullptr);
+        // vkDestroyShaderModule(device, vertShaderModule, nullptr);
+    }
+
+    void createImageViews()
+    {
+        swapChainImageViews.resize(swapChainImages.size());
+
+        for (size_t i = 0; i < swapChainImages.size(); i++)
+        {
+            VkImageViewCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            createInfo.image = swapChainImages[i];
+            createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            createInfo.format = swapChainImageFormat;
+
+            // The components field allows you to swizzle the color channels around
+            // For example, you can map all of the channels to the red channel for a monochrome texture
+            createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+            // The subresourceRange field describes what the image's purpose is and which part of the image should be accessed
+            createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            createInfo.subresourceRange.baseMipLevel = 0;
+            createInfo.subresourceRange.levelCount = 1;
+            createInfo.subresourceRange.baseArrayLayer = 0;
+            createInfo.subresourceRange.layerCount = 1;
+
+            if (vkCreateImageView(device, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS)
+            {
+                throw std::runtime_error("failed to create image views!");
+            }
+        }
     }
 
     void createSwapChain()
@@ -138,8 +230,55 @@ private:
         createInfo.imageFormat = surfaceFormat.format;
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
-        createInfo.imageArrayLayers = 1;
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        createInfo.imageArrayLayers = 1;                             // Always 1 unless stereoscopic 3D application (e.g. VR)
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // This means that we will render directly to the images of the swap chain (a color attachment is an image that will be presented on the screen)
+
+        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+        uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+
+        // If the graphics and present queues are different, we need to specify that the images can be used across multiple queue families
+        if (indices.graphicsFamily != indices.presentFamily)
+        {
+            // Images can be used across multiple queue families without explicit ownership transfers
+            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        }
+        else
+        {
+            // An image is owned by one queue family at a time and ownership must be explicitly transferred before using it in another queue family
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;     // Optional
+            createInfo.pQueueFamilyIndices = nullptr; // Optional
+        }
+
+        // We can specify that a certain transform should be applied to the images in the swap chain if it is supported, such as a 90 degree rotation or horizontal flip
+        // In this case, we don't want any transformation, so we use the currentTransform value
+        createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+
+        // We can specify if the alpha channel should be used for blending with other windows in the system
+        // We don't need this, so we use the opaque value
+        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+        createInfo.presentMode = presentMode;
+        // We can specify if we want to clip parts of the window that are obscured by other windows, for better performance
+        createInfo.clipped = VK_TRUE;
+
+        // If the old swap chain is no longer compatible with the new one (e.g. window was resized), we need to recreate the swap chain from scratch
+        // Here we specify the old swap chain, so that we can continue to present images that are already acquired
+        createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+        if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create swap chain!");
+        }
+
+        vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr);
+        swapChainImages.resize(imageCount);
+        vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.data());
+
+        swapChainImageFormat = surfaceFormat.format;
+        swapChainExtent = extent;
     }
 
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities)
@@ -542,6 +681,13 @@ private:
 
     void cleanup()
     {
+        for (auto imageView : swapChainImageViews)
+        {
+            vkDestroyImageView(device, imageView, nullptr);
+        }
+
+        vkDestroySwapchainKHR(device, swapChain, nullptr);
+
         vkDestroyDevice(device, nullptr);
 
         if (enableValidationLayers)
