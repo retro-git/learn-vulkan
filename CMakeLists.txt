@@ -35,16 +35,15 @@ target_link_libraries(VulkanApp Vulkan::Vulkan glfw glm::glm)
 
 # Platform-specific settings
 if(APPLE)
-    # macOS specific settings
     find_library(IOSURFACE_LIBRARY IOSurface REQUIRED)
     find_library(METAL_LIBRARY Metal REQUIRED)
     find_library(COCOA_LIBRARY Cocoa REQUIRED)
     find_library(IOKIT_LIBRARY IOKit REQUIRED)
     find_library(COREVIDEO_LIBRARY CoreVideo REQUIRED)
-    find_library(MOLTENVK MoltenVK REQUIRED)
     find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
+    find_library(MOLTENVK MoltenVK REQUIRED)
     
-    target_link_libraries(VulkanApp ${IOSURFACE_LIBRARY} ${METAL_LIBRARY} ${COCOA_LIBRARY} ${IOKIT_LIBRARY} ${COREVIDEO_LIBRARY} ${MOLTENVK} ${QUARTZCORE_LIBRARY})
+    target_link_libraries(VulkanApp ${IOSURFACE_LIBRARY} ${METAL_LIBRARY} ${COCOA_LIBRARY} ${IOKIT_LIBRARY} ${COREVIDEO_LIBRARY} ${QUARTZCORE_LIBRARY})
     
     # Add MoltenVK path (assuming MoltenVK is installed via Vulkan SDK)
     target_link_libraries(VulkanApp ${Vulkan_LIBRARY})

@@ -14,6 +14,8 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <cstring>
+#include <cerrno>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -91,19 +93,25 @@ public:
     }
 
 private:
-    GLFWwindow *window;
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger;
-    VkSurfaceKHR surface;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device;
-    VkQueue graphicsQueue;
-    VkQueue presentQueue;
-    VkSwapchainKHR swapChain;
-    std::vector<VkImage> swapChainImages;
-    VkFormat swapChainImageFormat;
-    VkExtent2D swapChainExtent;
-    std::vector<VkImageView> swapChainImageViews;
+    GLFWwindow *window; // Handle to the window
+
+    VkInstance instance;                     // Connection between application and Vulkan library
+    VkDebugUtilsMessengerEXT debugMessenger; // Debug messenger to receive debug messages from validation layers
+    VkSurfaceKHR surface;                    // Connection between window and Vulkan library
+
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE; // GPU
+    VkDevice device;                                  // Logical device to interact with physical device
+
+    VkQueue graphicsQueue; // Queue to submit command buffers to
+    VkQueue presentQueue;  // Queue to present images to the window
+
+    VkSwapchainKHR swapChain;                     // Queue of images to be presented to the screen (double buffering, triple buffering)
+    std::vector<VkImage> swapChainImages;         // Images in the swap chain
+    VkFormat swapChainImageFormat;                // Format of the images in the swap chain
+    VkExtent2D swapChainExtent;                   // Resolution of the swap chain images
+    std::vector<VkImageView> swapChainImageViews; // Image views to interpret the images in the swap chain
+
+    VkPipelineLayout pipelineLayout; // A pipeline layout is a Vulkan object that defines the set of resources that can be accessed by a pipeline
 
     void initWindow()
     {
@@ -133,7 +141,8 @@ private:
 
         if (!file.is_open())
         {
-            throw std::runtime_error("failed to open file!");
+            std::string errorMsg = "Failed to open file: " + filename + " - " + std::strerror(errno);
+            throw std::runtime_error(errorMsg);
         }
 
         size_t fileSize = (size_t)file.tellg();
@@ -147,6 +156,7 @@ private:
         return buffer;
     }
 
+    // Shader modules are used to load SPIR-V bytecode into Vulkan
     VkShaderModule createShaderModule(const std::vector<char> &code)
     {
         VkShaderModuleCreateInfo createInfo{};
@@ -165,16 +175,110 @@ private:
 
     void createGraphicsPipeline()
     {
-        std::vector<char> vertShaderCode = readFile("shaders/vert.spv");
+        auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
 
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT; // Shader type
+        vertShaderStageInfo.module = vertShaderModule;
+        vertShaderStageInfo.pName = "main"; // Entry point
+
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+        fragShaderStageInfo.pName = "main";
+
+        VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+        // Describes the format of the vertex data that will be passed to the vertex shader
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputInfo.vertexBindingDescriptionCount = 0;
+        vertexInputInfo.vertexAttributeDescriptionCount = 0;
+
+        // Describes the type of geometry (e.g. triangle, line, point) and if primitive restart should be enabled
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+        // The viewport describes the region of the framebuffer that the output will be rendered to
+        // Typically (0, 0) to (width, height)
+        // The scissor rectangle defines in which regions pixels will actually be stored
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        // The rasterizer takes the geometry that is shaped by the vertices from the vertex shader and turns it into fragments to be colored by the fragment shader
+        // It also performs depth testing, face culling and the scissor test
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.depthBiasEnable = VK_FALSE;
+
+        // The multisampling state is used for anti-aliasing
+        // We will use 1 sample per pixel, so we will disable it
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        // In Vulkan, an attachment refers to a framebuffer that a render pass will use
+        // A render pass will use one or more attachments to fill in during rendering
+        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        colorBlendAttachment.blendEnable = VK_FALSE;
+
+        // The color blending state is used to combine the color from the fragment shader with the color that is already in the framebuffer
+        // We will use the default values for blending
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.logicOp = VK_LOGIC_OP_COPY;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlendAttachment;
+        colorBlending.blendConstants[0] = 0.0f;
+        colorBlending.blendConstants[1] = 0.0f;
+        colorBlending.blendConstants[2] = 0.0f;
+        colorBlending.blendConstants[3] = 0.0f;
+
+        // Usually, a Vulkan pipeline is immutable and cannot be changed after creation
+        // However, some state can be configured as dynamic, such as the viewport and scissor rectangle
+        std::vector<VkDynamicState> dynamicStates = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+        dynamicState.pDynamicStates = dynamicStates.data();
+
+        // The pipeline layout is a Vulkan object that defines the set of resources that can be accessed by a pipeline
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 0;
+        pipelineLayoutInfo.pushConstantRangeCount = 0;
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create pipeline layout!");
+        }
+
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
 
+    // An image view is a way to interpret an image, analogous to std::string_view
     void createImageViews()
     {
         swapChainImageViews.resize(swapChainImages.size());
@@ -208,6 +312,7 @@ private:
         }
     }
 
+    // A swap chain is essentially a queue of images that are waiting to be presented to the screen e.g. double buffering, triple bufferings
     void createSwapChain()
     {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
@@ -273,6 +378,8 @@ private:
             throw std::runtime_error("failed to create swap chain!");
         }
 
+        // The swap chain automatically creates images with the format and extent that match the window, for each image in the swap chain
+        // We need to retrieve the handles to these images with vkGetSwapchainImagesKHR
         vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr);
         swapChainImages.resize(imageCount);
         vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.data());
