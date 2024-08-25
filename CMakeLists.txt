@@ -1,9 +1,11 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.30)
 
 # Set the project name and version
 project(VulkanApp VERSION 1.0)
 
 include(cmake/CPM.cmake)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -34,7 +36,7 @@ CPMAddPackage(
 CPMAddPackage(
   NAME glm
   GITHUB_REPOSITORY g-truc/glm
-  GIT_TAG 0.9.9.8
+  GIT_TAG 1.0.1
 )
 
 # Set include directories
