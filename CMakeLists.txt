@@ -1,23 +1,16 @@
 cmake_minimum_required(VERSION 3.30)
 
-# Set the project name and version
 project(VulkanApp VERSION 1.0)
 
 include(cmake/CPM.cmake)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# Find Vulkan
+# Find packages
 find_package(Vulkan REQUIRED)
 
-# Find GLFW
-# find_package(GLFW3 REQUIRED)
-
-# add glfw3 with cpm
 CPMAddPackage(
   NAME glfw
   GITHUB_REPOSITORY glfw/glfw
@@ -29,10 +22,6 @@ CPMAddPackage(
     "GLFW_INSTALL Off"
 )
 
-# Find GLM
-# find_package(glm REQUIRED)
-
-# add glm with cpm
 CPMAddPackage(
   NAME glm
   GITHUB_REPOSITORY g-truc/glm
@@ -50,10 +39,7 @@ file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h")
 # Add the executable
 add_executable(VulkanApp ${SOURCES})
 
-# print where find_package is looking
-message(STATUS "Vulkan_INCLUDE_DIR: ${Vulkan_INCLUDE_DIR}")
-
-# Link Vulkan and GLFW
+# Link Vulkan, glfw, glm
 target_link_libraries(VulkanApp Vulkan::Vulkan glfw glm::glm)
 
 # Platform-specific settings

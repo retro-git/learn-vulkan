@@ -66,6 +66,10 @@
         "xstring": "cpp",
         "xtr1common": "cpp",
         "xtree": "cpp",
-        "xutility": "cpp"
+        "xutility": "cpp",
+        "expected": "cpp",
+        "map": "cpp",
+        "random": "cpp",
+        "span": "cpp"
     }
 }

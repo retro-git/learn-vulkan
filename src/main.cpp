@@ -4,7 +4,7 @@
 #include <GLFW/glfw3.h>
 
 #if defined(__APPLE__)
-    #include <vulkan/vulkan_beta.h>
+#include <vulkan/vulkan_beta.h>
 #endif
 
 #include <iostream>
@@ -43,6 +43,27 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
+
+std::vector<char> readFile(const std::string &filename)
+{
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open())
+    {
+        std::string errorMsg = "Failed to open file: " + filename + " - " + std::strerror(errno);
+        throw std::runtime_error(errorMsg);
+    }
+
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<char> buffer(fileSize);
+
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+
+    file.close();
+
+    return buffer;
+}
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkDebugUtilsMessengerEXT *pDebugMessenger)
 {
@@ -119,6 +140,17 @@ private:
     VkRenderPass renderPass;         // Describes the attachments used during rendering
     VkPipelineLayout pipelineLayout; // Uniform values for shaders
 
+    VkPipeline graphicsPipeline; // Configures the programmable and fixed-function stages of the pipeline
+
+    std::vector<VkFramebuffer> swapChainFramebuffers; // Framebuffers to render images to
+
+    VkCommandPool commandPool;     // We need one command pool for each queue family that we want to send commands to (e.g. graphics, presentation)
+    VkCommandBuffer commandBuffer; // Command buffer to record commands into
+
+    VkSemaphore imageAvailableSemaphore;
+    VkSemaphore renderFinishedSemaphore;
+    VkFence inFlightFence;
+
     void initWindow()
     {
         glfwInit();
@@ -140,27 +172,139 @@ private:
         createImageViews();       // Image views to interpret the images in the swap chain (requires swap chain)
         createRenderPass();       // Describes the attachments used during rendering (requires swap chain image format)
         createGraphicsPipeline(); // Configure the programmable and fixed-function stages of the pipeline
+        createFramebuffers();     // Framebuffers to render images to (requires swap chain image views)
+        createCommandPool();      // Command pool to allocate command buffers from
+        createCommandBuffer();    // Command buffer to record commands into
+        createSyncObjects();      // Semaphores and fences to synchronize rendering
     }
 
-    static std::vector<char> readFile(const std::string &filename)
+    void createSyncObjects()
     {
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        if (!file.is_open())
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS)
         {
-            std::string errorMsg = "Failed to open file: " + filename + " - " + std::strerror(errno);
-            throw std::runtime_error(errorMsg);
+            throw std::runtime_error("failed to create semaphores!");
         }
 
-        size_t fileSize = (size_t)file.tellg();
-        std::vector<char> buffer(fileSize);
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // Start in the signaled state
 
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
+        if (vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create fences!");
+        }
+    }
 
-        file.close();
+    // Write the commands we want to execute to the command buffer
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+    {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-        return buffer;
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to begin recording command buffer!");
+        }
+
+        VkRenderPassBeginInfo renderPassInfo{}; // Begin a new render pass
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
+        renderPassInfo.renderArea.offset = {0, 0};
+        renderPassInfo.renderArea.extent = swapChainExtent;
+
+        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearColor;
+
+        // Begin recording commands to the command buffer
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+        // We configured viewport and scissor to be dynamic in the pipeline, so we need to set them here
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(swapChainExtent.width);
+        viewport.height = static_cast<float>(swapChainExtent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = swapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(commandBuffer);
+
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to record command buffer!");
+        }
+    }
+
+    void createCommandBuffer()
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; // Primary: Can be submitted to a queue for execution, but cannot be called from other command buffers. Secondary: Cannot be submitted directly, but can be called from primary command buffers.
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to allocate command buffers!");
+        }
+    }
+
+    void createCommandPool()
+    {
+        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create command pool!");
+        }
+    }
+
+    // An attachment is represented by a VkImageView.
+    // The attachments specified during render pass creation are bound by wrapping them in a VkFramebuffer.
+    void createFramebuffers()
+    {
+        swapChainFramebuffers.resize(swapChainImageViews.size());
+
+        for (size_t i = 0; i < swapChainImageViews.size(); i++)
+        {
+            VkImageView attachments[] = {
+                swapChainImageViews[i]};
+
+            VkFramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebufferInfo.renderPass = renderPass; // Soecify with which render pass the framebuffer needs to be compatible (must have the same number and type of attachments)
+            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.width = swapChainExtent.width;
+            framebufferInfo.height = swapChainExtent.height;
+            framebufferInfo.layers = 1;
+
+            if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS)
+            {
+                throw std::runtime_error("failed to create framebuffer!");
+            }
+        }
     }
 
     void createRenderPass()
@@ -199,6 +343,16 @@ private:
         subpass.colorAttachmentCount = 1;                            // Number of color attachments. The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive
         subpass.pColorAttachments = &colorAttachmentRef;             // Reference to the color attachment
 
+        // A VkSubpassDependency describes a dependency between two subpasses
+        // We only have one subpass, but nevertheless, there are two implicit subpasses: 1) External subpass before the render pass, 2) External subpass after the render pass
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;                             // Dependency
+        dependency.dstSubpass = 0;                                               // Dependent
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // Pipeline stage that must be finished before the dependency can be executed
+        dependency.srcAccessMask = 0;                                            // Access mask that must be satisfied before the dependency can be executed
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // Pipeline stage that the dependent subpass waits on
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;         // Access mask that the dependent subpass waits on
+
         // The following other types of attachments can be referenced in a subpass:
         // pInputAttachments: Attachments that are read from a shader
         // pResolveAttachments: Attachments used for multisampling color attachments
@@ -212,6 +366,8 @@ private:
         renderPassInfo.pAttachments = &colorAttachment; // Attachments
         renderPassInfo.subpassCount = 1;                // Number of subpasses
         renderPassInfo.pSubpasses = &subpass;           // Subpasses
+        renderPassInfo.dependencyCount = 1;             // Number of dependencies
+        renderPassInfo.pDependencies = &dependency;     // Dependencies
 
         if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
         {
@@ -353,6 +509,43 @@ private:
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
         {
             throw std::runtime_error("failed to create pipeline layout!");
+        }
+
+        // WE NOW HAVE:
+        // 1) Shader modules (vertex and fragment, programmable stages)
+        // 2) Fixed-function stages (vertex input, input assembly, viewport, rasterizer, multisampling, color blending)
+        // 3) Pipeline layout (uniform values for shaders that can be changed at drawing time)
+        // 4) Render pass (attachments, subpasses, dependencies)
+        // 5) Dynamic state (dynamic viewport and scissor rectangle)
+        // We can now create the graphics pipeline (all of the above combined)
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;         // Number of shader stages
+        pipelineInfo.pStages = shaderStages; // Shader stages
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr; // Optional
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = pipelineLayout;
+        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.subpass = 0;
+
+        // Vulkan allows you to create a new graphics pipeline by deriving from an existing pipeline
+        // It is less expensive than creating a new pipeline from scratch, if we only need to change a few things
+        // Switching between pipelines from the same parent can be done more efficiently
+        // However, we don't need this, so we set the basePipelineHandle and basePipelineIndex to VK_NULL_HANDLE and -1 respectively
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+        pipelineInfo.basePipelineIndex = -1;              // Optional
+
+        // The second parameter is a cache object that allows you to reuse the result of pipeline creation
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create graphics pipeline!");
         }
 
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
@@ -864,11 +1057,103 @@ private:
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+            drawFrame();
         }
+
+        // There may still be asynchronous operations in progress, so we need to wait for the device to finish before cleaning up
+        vkDeviceWaitIdle(device);
+    }
+
+    void drawFrame()
+    {
+        // We need to:
+        // 1) Wait for the previous frame to finish
+        // 2) Acquire an image from the swap chain
+        // 3) Record a command buffer which draws the scene onto that image
+        // 4) Submit the command buffer to the graphics queue
+        // 5) Return the image to the swap chain for presentation
+
+        // SYNCHRONIZATION:
+        // Many Vulkan API calls that work on the GPU are asynchronous (e.g. acquiring an image from the swap chain, executing commands, presenting to the screen)
+        // Therefore, we must manually synchronize these operations, e.g. with semaphores and fences
+
+        // SEMAPHORE:
+        // A semaphore is a synchronization primitive that can be used to insert a dependency between operations
+        // There are two types of semaphores in Vulkan: 1) Binary semaphores 2) Timeline semaphores (integer value)
+        // We will only use binary semaphores here
+        // Let's say we want to execute two async operations on the GPU in sequence: A and B
+        // We create a semaphore that signals when A is done, and that B waits for
+        // However, this only effects the synchronization on the GPU, not the CPU. For the CPU, we need to use FENCES
+
+        // FENCE:
+        // If the CPU needs to know when a GPU operation is finished, we use a fence
+        // A fence can be signaled by the GPU, and waited on by the CPU
+        // We will use a fence to wait for the frame to finish before starting the next one
+
+        vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &inFlightFence);
+
+        // Get the index of the next image in the swap chain
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+        vkResetCommandBuffer(commandBuffer, 0);
+        recordCommandBuffer(commandBuffer, imageIndex);
+
+        // VkSubmitInfo is used to submit command buffers to queues
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        // We need to specify that before we can execute the command buffer, we need to wait for the imageAvailableSemaphore to be signaled
+        // Then after the command buffer has finished executing, we need to signal the renderFinishedSemaphore
+        VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores; // Set the semaphore to wait on before starting the command buffer
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores; // Set the semaphore to signal when the command buffer finishes
+
+        // Submit the command buffer to the graphics queue, and wait for the image available semaphore
+        if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to submit draw command buffer!");
+        }
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+        // We need to specify that we need to wait for the renderFinishedSemaphore to be signaled before presenting the image
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+
+        VkSwapchainKHR swapChains[] = {swapChain};
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &imageIndex;
+
+        // Present the image to the screen
+        vkQueuePresentKHR(presentQueue, &presentInfo);
     }
 
     void cleanup()
     {
+        vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
+        vkDestroyFence(device, inFlightFence, nullptr);
+
+        vkDestroyCommandPool(device, commandPool, nullptr);
+
+        for (auto framebuffer : swapChainFramebuffers)
+        {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 
         vkDestroyRenderPass(device, renderPass, nullptr);
